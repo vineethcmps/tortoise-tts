@@ -47,5 +47,4 @@ def get_voice():
 if __name__ == "__main__":
     # app.run(debug=True)
     do_tts("hello","male","fast")
-    app.run(debug=True)
-    print("hello")
+    app.run(host="0.0.0.0")
