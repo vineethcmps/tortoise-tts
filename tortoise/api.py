@@ -198,7 +198,7 @@ class TextToSpeech:
     Main entry point into Tortoise.
     """
 
-    def __init__(self, autoregressive_batch_size=None, models_dir=MODELS_DIR, enable_redaction=True, device=None):
+    def __init__(self, autoregressive_batch_size=8, models_dir=MODELS_DIR, enable_redaction=True, device=None):
         """
         Constructor
         :param autoregressive_batch_size: Specifies how many samples to generate per batch. Lower this if you are seeing
@@ -227,23 +227,28 @@ class TextToSpeech:
             self.autoregressive = UnifiedVoice(max_mel_tokens=604, max_text_tokens=402, max_conditioning_inputs=2, layers=30,
                                           model_dim=1024,
                                           heads=16, number_text_tokens=255, start_text_token=255, checkpointing=False,
-                                          train_solo_embeddings=False).cpu().eval()
-            self.autoregressive.load_state_dict(torch.load(get_model_path('autoregressive.pth', models_dir)))
+                                          train_solo_embeddings=False).eval()
+            self.autoregressive.load_state_dict(torch.load(get_model_path('autoregressive.pth', models_dir), map_location=self.device))
 
             self.diffusion = DiffusionTts(model_channels=1024, num_layers=10, in_channels=100, out_channels=200,
                                           in_latent_channels=1024, in_tokens=8193, dropout=0, use_fp16=False, num_heads=16,
-                                          layer_drop=0, unconditioned_percentage=0).cpu().eval()
-            self.diffusion.load_state_dict(torch.load(get_model_path('diffusion_decoder.pth', models_dir)))
+                                          layer_drop=0, unconditioned_percentage=0).eval()
+            self.diffusion.load_state_dict(torch.load(get_model_path('diffusion_decoder.pth', models_dir), map_location=self.device))
+
+        self.autoregressive.to(self.device)
+        self.diffusion.to(self.device)
 
         self.clvp = CLVP(dim_text=768, dim_speech=768, dim_latent=768, num_text_tokens=256, text_enc_depth=20,
                          text_seq_len=350, text_heads=12,
                          num_speech_tokens=8192, speech_enc_depth=20, speech_heads=12, speech_seq_len=430,
-                         use_xformers=True).cpu().eval()
-        self.clvp.load_state_dict(torch.load(get_model_path('clvp2.pth', models_dir)))
+                         use_xformers=True).eval()
+        self.clvp.load_state_dict(torch.load(get_model_path('clvp2.pth', models_dir), map_location=self.device))
+        self.clvp.to(self.device)
         self.cvvp = None # CVVP model is only loaded if used.
 
-        self.vocoder = UnivNetGenerator().cpu()
-        self.vocoder.load_state_dict(torch.load(get_model_path('vocoder.pth', models_dir), map_location=torch.device('cpu'))['model_g'])
+        self.vocoder = UnivNetGenerator()
+        self.vocoder.load_state_dict(torch.load(get_model_path('vocoder.pth', models_dir), map_location=self.device)['model_g'])
+        self.vocoder.to(self.device)
         self.vocoder.eval(inference=True)
 
         # Random latent generators (RLGs) are loaded lazily.
@@ -253,8 +258,9 @@ class TextToSpeech:
     def load_cvvp(self):
         """Load CVVP model."""
         self.cvvp = CVVP(model_dim=512, transformer_heads=8, dropout=0, mel_codes=8192, conditioning_enc_depth=8, cond_mask_percentage=0,
-                         speech_enc_depth=8, speech_mask_percentage=0, latent_multiplier=1).cpu().eval()
-        self.cvvp.load_state_dict(torch.load(get_model_path('cvvp.pth', self.models_dir)))
+                         speech_enc_depth=8, speech_mask_percentage=0, latent_multiplier=1).eval()
+        self.cvvp.load_state_dict(torch.load(get_model_path('cvvp.pth', self.models_dir), map_location=self.device))
+        self.cvvp.to(self.device)
 
     def get_conditioning_latents(self, voice_samples, return_mels=False):
         """
@@ -272,9 +278,9 @@ class TextToSpeech:
             for vs in voice_samples:
                 auto_conds.append(format_conditioning(vs, device=self.device))
             auto_conds = torch.stack(auto_conds, dim=1)
-            self.autoregressive = self.autoregressive.to(self.device)
+            # self.autoregressive = self.autoregressive.to(self.device)
             auto_latent = self.autoregressive.get_conditioning(auto_conds)
-            self.autoregressive = self.autoregressive.cpu()
+            # self.autoregressive = self.autoregressive.cpu()
 
             diffusion_conds = []
             for sample in voice_samples:
@@ -285,9 +291,9 @@ class TextToSpeech:
                 diffusion_conds.append(cond_mel)
             diffusion_conds = torch.stack(diffusion_conds, dim=1)
 
-            self.diffusion = self.diffusion.to(self.device)
+            # self.diffusion = self.diffusion.to(self.device)
             diffusion_latent = self.diffusion.get_conditioning(diffusion_conds)
-            self.diffusion = self.diffusion.cpu()
+            # self.diffusion = self.diffusion.cpu()
 
         if return_mels:
             return auto_latent, diffusion_latent, auto_conds, diffusion_conds
@@ -394,8 +400,8 @@ class TextToSpeech:
             auto_conditioning, diffusion_conditioning = conditioning_latents
         else:
             auto_conditioning, diffusion_conditioning = self.get_random_conditioning_latents()
-        auto_conditioning = auto_conditioning.to(self.device)
-        diffusion_conditioning = diffusion_conditioning.to(self.device)
+        # auto_conditioning = auto_conditioning.to(self.device)
+        # diffusion_conditioning = diffusion_conditioning.to(self.device)
 
         diffuser = load_discrete_vocoder_diffuser(desired_diffusion_steps=diffusion_iterations, cond_free=cond_free, cond_free_k=cond_free_k)
 
@@ -404,7 +410,7 @@ class TextToSpeech:
             num_batches = num_autoregressive_samples // self.autoregressive_batch_size
             stop_mel_token = self.autoregressive.stop_mel_token
             calm_token = 83  # This is the token for coding silence, which is fixed in place with "fix_autoregressive_output"
-            self.autoregressive = self.autoregressive.to(self.device)
+            # self.autoregressive = self.autoregressive.to(self.device)
             if verbose:
                 print("Generating autoregressive samples..")
             for b in tqdm(range(num_batches), disable=not verbose):
@@ -420,14 +426,14 @@ class TextToSpeech:
                 padding_needed = max_mel_tokens - codes.shape[1]
                 codes = F.pad(codes, (0, padding_needed), value=stop_mel_token)
                 samples.append(codes)
-            self.autoregressive = self.autoregressive.cpu()
+            # self.autoregressive = self.autoregressive.cpu()
 
             clip_results = []
-            self.clvp = self.clvp.to(self.device)
+            # self.clvp = self.clvp.to(self.device)
             if cvvp_amount > 0:
                 if self.cvvp is None:
                     self.load_cvvp()
-                self.cvvp = self.cvvp.to(self.device)
+                # self.cvvp = self.cvvp.to(self.device)
             if verbose:
                 if self.cvvp is None:
                     print("Computing best candidates using CLVP")
@@ -452,27 +458,27 @@ class TextToSpeech:
             clip_results = torch.cat(clip_results, dim=0)
             samples = torch.cat(samples, dim=0)
             best_results = samples[torch.topk(clip_results, k=k).indices]
-            self.clvp = self.clvp.cpu()
-            if self.cvvp is not None:
-                self.cvvp = self.cvvp.cpu()
+            # self.clvp = self.clvp.cpu()
+            # if self.cvvp is not None:
+            #     self.cvvp = self.cvvp.cpu()
             del samples
 
             # The diffusion model actually wants the last hidden layer from the autoregressive model as conditioning
             # inputs. Re-produce those for the top results. This could be made more efficient by storing all of these
             # results, but will increase memory usage.
-            self.autoregressive = self.autoregressive.to(self.device)
+            # self.autoregressive = self.autoregressive.to(self.device)
             best_latents = self.autoregressive(auto_conditioning.repeat(k, 1), text_tokens.repeat(k, 1),
                                                torch.tensor([text_tokens.shape[-1]], device=text_tokens.device), best_results,
                                                torch.tensor([best_results.shape[-1]*self.autoregressive.mel_length_compression], device=text_tokens.device),
                                                return_latent=True, clip_inputs=False)
-            self.autoregressive = self.autoregressive.cpu()
+            # self.autoregressive = self.autoregressive.cpu()
             del auto_conditioning
 
             if verbose:
                 print("Transforming autoregressive outputs into audio..")
             wav_candidates = []
-            self.diffusion = self.diffusion.to(self.device)
-            self.vocoder = self.vocoder.to(self.device)
+            # self.diffusion = self.diffusion.to(self.device)
+            # self.vocoder = self.vocoder.to(self.device)
             for b in range(best_results.shape[0]):
                 codes = best_results[b].unsqueeze(0)
                 latents = best_latents[b].unsqueeze(0)
@@ -492,8 +498,8 @@ class TextToSpeech:
                                                temperature=diffusion_temperature, verbose=verbose)
                 wav = self.vocoder.inference(mel)
                 wav_candidates.append(wav.cpu())
-            self.diffusion = self.diffusion.cpu()
-            self.vocoder = self.vocoder.cpu()
+            # self.diffusion = self.diffusion.cpu()
+            # self.vocoder = self.vocoder.cpu()
 
             def potentially_redact(clip, text):
                 if self.enable_redaction:
