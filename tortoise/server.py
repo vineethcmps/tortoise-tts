@@ -2,10 +2,11 @@ import os
 
 import torch
 import torchaudio
+import uuid
 
 from api import TextToSpeech, MODELS_DIR
 from utils.audio import load_voices
-from flask import Flask, request, make_response
+from flask import Flask, request, jsonify
 import random
 from io import BytesIO
 
@@ -19,15 +20,15 @@ voice_to_gender = {
 }
 
 def do_tts(text, gender, preset):
+    name= str(uuid.uuid4())
     voice_sel = random.choice(voice_to_gender[gender])
     voice_samples, conditioning_latents = load_voices([voice_sel])
     gen, dbg_state = tts.tts_with_preset(text, k=1, voice_samples=voice_samples, conditioning_latents=conditioning_latents,
                                 preset=preset, use_deterministic_seed=None, return_deterministic_state=True, cvvp_amount=.0)
     # code to generate story based on the script
-
-    byts = BytesIO()
-    torchaudio.save(byts, gen.squeeze(0).cpu(), 24000, format="wav")
-    return byts
+    out_file = f"/out/{uuid.uuid4()}.wav"
+    torchaudio.save(out_file, gen.squeeze(0).cpu(), 24000, format="wav")
+    return out_file
 
 
 @app.route("/get_voice", methods=["POST"])
@@ -36,12 +37,8 @@ def get_voice():
     gender = request.json.get("gender", "male")
     preset = request.json.get("preset", "fast")
 
-    audio_bytes = do_tts(text, gender, preset)
-    response = make_response(audio_bytes.getvalue())
-    audio_bytes.close()
-    response.headers['Content-Type'] = 'audio/wav'
-    response.headers['Content-Disposition'] = 'attachment; filename=sound.wav'
-    return response
+    out_file = do_tts(text, gender, preset)
+    return jsonify({"out_file": out_file})
 
 
 if __name__ == "__main__":
