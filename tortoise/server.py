@@ -44,7 +44,7 @@ def do_tts_paragraph(text, gender, preset, voice_sel=None):
     seed = int(time.time())
     for j, text in enumerate(texts):
         gen = tts.tts_with_preset(text, voice_samples=voice_samples, conditioning_latents=conditioning_latents,
-                                  preset=preset, k=1, use_deterministic_seed=seed)
+                                  preset=preset, k=1, use_deterministic_seed=seed, temperature=0)
         gen = gen.squeeze(0).cpu()
         all_parts.append(gen)
 
