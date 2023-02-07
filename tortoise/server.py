@@ -27,7 +27,7 @@ def do_tts(text, gender, preset, voice_sel=None):
         voice_sel = random.choice(voice_to_gender[gender])
     voice_samples, conditioning_latents = load_voices([voice_sel])
     gen, dbg_state = tts.tts_with_preset(text, k=1, voice_samples=voice_samples, conditioning_latents=conditioning_latents,
-                                preset=preset, use_deterministic_seed=None, return_deterministic_state=True, cvvp_amount=.0)
+                                preset=preset, use_deterministic_seed=None, return_deterministic_state=True, cvvp_amount=.0, temperature=0.1)
     # code to generate story based on the script
     out_file = f"/out/{uuid.uuid4()}.wav"
     torchaudio.save(out_file, gen.squeeze(0).cpu(), 24000, format="wav")
